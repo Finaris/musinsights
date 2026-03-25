@@ -3,13 +3,13 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from musinsights.db.models import AudioFeatures, Song, SpectralFeatures
+from musinsights.db.models import Song
 
 
 def _serialize_datetime(obj: Any) -> Any:
@@ -19,8 +19,29 @@ def _serialize_datetime(obj: Any) -> Any:
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
+async def _fetch_songs_with_features(session: AsyncSession) -> Sequence[Song]:
+    """Fetch all songs with their features eagerly loaded.
+
+    Args:
+        session: Database session.
+
+    Returns:
+        Sequence of Song objects with features loaded.
+    """
+    stmt = (
+        select(Song)
+        .options(
+            selectinload(Song.audio_features),
+            selectinload(Song.spectral_features),
+        )
+        .order_by(Song.artist, Song.title)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
 def _song_to_dict(song: Song, include_features: bool = True) -> dict[str, Any]:
-    """Convert a Song object to a dictionary.
+    """Convert a Song object to a nested dictionary (for JSON).
 
     Args:
         song: Song object to convert.
@@ -67,8 +88,54 @@ def _song_to_dict(song: Song, include_features: bool = True) -> dict[str, Any]:
             "spectral_rolloff": sf.spectral_rolloff,
             "zero_crossing_rate": sf.zero_crossing_rate,
             "analyzed_at": sf.analyzed_at.isoformat() if sf.analyzed_at else None,
-            # Binary fields are not included in JSON export
         }
+
+    return data
+
+
+def _song_to_flat_dict(song: Song) -> dict[str, Any]:
+    """Convert a Song object to a flat dictionary (for CSV).
+
+    Args:
+        song: Song object to convert.
+
+    Returns:
+        Flat dictionary with all fields at top level.
+    """
+    data = _song_to_dict(song, include_features=False)
+
+    # Remove fields not suitable for CSV
+    data.pop("file_path", None)
+    data.pop("file_hash", None)
+    data.pop("external_ids", None)
+    data.pop("created_at", None)
+    data.pop("updated_at", None)
+
+    # Flatten audio features
+    if song.audio_features:
+        af = song.audio_features
+        data.update({
+            "tempo": af.tempo,
+            "time_signature": af.time_signature,
+            "key": af.key,
+            "mode": af.mode,
+            "loudness": af.loudness,
+            "energy": af.energy,
+            "danceability": af.danceability,
+            "valence": af.valence,
+            "acousticness": af.acousticness,
+            "instrumentalness": af.instrumentalness,
+            "speechiness": af.speechiness,
+        })
+
+    # Flatten spectral features
+    if song.spectral_features:
+        sf = song.spectral_features
+        data.update({
+            "spectral_centroid": sf.spectral_centroid,
+            "spectral_rolloff": sf.spectral_rolloff,
+            "zero_crossing_rate": sf.zero_crossing_rate,
+        })
 
     return data
 
@@ -88,16 +155,7 @@ async def export_to_json(
     Returns:
         Number of songs exported.
     """
-    stmt = (
-        select(Song)
-        .options(
-            selectinload(Song.audio_features),
-            selectinload(Song.spectral_features),
-        )
-        .order_by(Song.artist, Song.title)
-    )
-    result = await session.execute(stmt)
-    songs = result.scalars().all()
+    songs = await _fetch_songs_with_features(session)
 
     data = {
         "exported_at": datetime.utcnow().isoformat(),
@@ -111,6 +169,31 @@ async def export_to_json(
         json.dump(data, f, indent=indent, default=_serialize_datetime)
 
     return len(songs)
+
+
+# CSV column order
+CSV_COLUMNS = [
+    "id",
+    "title",
+    "artist",
+    "album",
+    "duration_ms",
+    "source",
+    "tempo",
+    "time_signature",
+    "key",
+    "mode",
+    "loudness",
+    "energy",
+    "danceability",
+    "valence",
+    "acousticness",
+    "instrumentalness",
+    "speechiness",
+    "spectral_centroid",
+    "spectral_rolloff",
+    "zero_crossing_rate",
+]
 
 
 async def export_to_csv(
@@ -128,78 +211,14 @@ async def export_to_csv(
     """
     import csv
 
-    stmt = (
-        select(Song)
-        .options(
-            selectinload(Song.audio_features),
-            selectinload(Song.spectral_features),
-        )
-        .order_by(Song.artist, Song.title)
-    )
-    result = await session.execute(stmt)
-    songs = result.scalars().all()
-
-    # Define CSV columns
-    columns = [
-        "id",
-        "title",
-        "artist",
-        "album",
-        "duration_ms",
-        "source",
-        "tempo",
-        "key",
-        "mode",
-        "loudness",
-        "energy",
-        "danceability",
-        "valence",
-        "acousticness",
-        "instrumentalness",
-        "speechiness",
-        "spectral_centroid",
-        "spectral_rolloff",
-        "zero_crossing_rate",
-    ]
+    songs = await _fetch_songs_with_features(session)
 
     with open(output_path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=columns)
+        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
         writer.writeheader()
 
         for song in songs:
-            row = {
-                "id": song.id,
-                "title": song.title,
-                "artist": song.artist,
-                "album": song.album,
-                "duration_ms": song.duration_ms,
-                "source": song.source,
-            }
-
-            if song.audio_features:
-                af = song.audio_features
-                row.update({
-                    "tempo": af.tempo,
-                    "key": af.key,
-                    "mode": af.mode,
-                    "loudness": af.loudness,
-                    "energy": af.energy,
-                    "danceability": af.danceability,
-                    "valence": af.valence,
-                    "acousticness": af.acousticness,
-                    "instrumentalness": af.instrumentalness,
-                    "speechiness": af.speechiness,
-                })
-
-            if song.spectral_features:
-                sf = song.spectral_features
-                row.update({
-                    "spectral_centroid": sf.spectral_centroid,
-                    "spectral_rolloff": sf.spectral_rolloff,
-                    "zero_crossing_rate": sf.zero_crossing_rate,
-                })
-
-            writer.writerow(row)
+            writer.writerow(_song_to_flat_dict(song))
 
     return len(songs)
 
