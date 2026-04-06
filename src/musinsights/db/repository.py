@@ -1,6 +1,6 @@
 """Repository pattern for database operations."""
 
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,7 @@ class SongRepository:
         await self.session.flush()
         return song
 
-    async def get_by_id(self, song_id: str, load_features: bool = False) -> Optional[Song]:
+    async def get_by_id(self, song_id: str, load_features: bool = False) -> Song | None:
         """Get a song by its ID.
 
         Args:
@@ -52,7 +52,7 @@ class SongRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_file_path(self, file_path: str) -> Optional[Song]:
+    async def get_by_file_path(self, file_path: str) -> Song | None:
         """Get a song by its file path.
 
         Args:
@@ -65,7 +65,7 @@ class SongRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_by_file_hash(self, file_hash: str) -> Optional[Song]:
+    async def get_by_file_hash(self, file_hash: str) -> Song | None:
         """Get a song by its file hash.
 
         Args:
@@ -80,8 +80,8 @@ class SongRepository:
 
     async def get_all(
         self,
-        source: Optional[str] = None,
-        limit: Optional[int] = None,
+        source: str | None = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> Sequence[Song]:
         """Get all songs, optionally filtered by source.
@@ -104,7 +104,7 @@ class SongRepository:
         result = await self.session.execute(stmt)
         return result.scalars().all()
 
-    async def get_unanalyzed(self, limit: Optional[int] = None) -> Sequence[Song]:
+    async def get_unanalyzed(self, limit: int | None = None) -> Sequence[Song]:
         """Get songs that haven't been analyzed yet.
 
         Args:
@@ -151,7 +151,7 @@ class SongRepository:
             return True
         return False
 
-    async def count(self, source: Optional[str] = None) -> int:
+    async def count(self, source: str | None = None) -> int:
         """Count total songs, optionally filtered by source.
 
         Args:
@@ -168,6 +168,25 @@ class SongRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one()
 
+    async def get_without_mbid(self, limit: int | None = None) -> Sequence[Song]:
+        """Get songs without MusicBrainz recording IDs.
+
+        Args:
+            limit: Maximum number of songs to return.
+
+        Returns:
+            List of Song objects without MusicBrainz IDs.
+        """
+        stmt = (
+            select(Song)
+            .where(Song.musicbrainz_recording_id.is_(None))
+            .order_by(Song.created_at.desc())
+        )
+        if limit:
+            stmt = stmt.limit(limit)
+        result = await self.session.execute(stmt)
+        return result.scalars().all()
+
 
 class AudioFeaturesRepository:
     """Repository for AudioFeatures database operations."""
@@ -181,7 +200,7 @@ class AudioFeaturesRepository:
         await self.session.flush()
         return features
 
-    async def get_by_song_id(self, song_id: str) -> Optional[AudioFeatures]:
+    async def get_by_song_id(self, song_id: str) -> AudioFeatures | None:
         """Get audio features for a specific song."""
         stmt = select(AudioFeatures).where(AudioFeatures.song_id == song_id)
         result = await self.session.execute(stmt)
@@ -215,7 +234,7 @@ class ListeningHistoryRepository:
     async def get_by_song_id(
         self,
         song_id: str,
-        limit: Optional[int] = None,
+        limit: int | None = None,
     ) -> Sequence[ListeningHistory]:
         """Get listening history for a specific song."""
         stmt = (

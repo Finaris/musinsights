@@ -1,7 +1,6 @@
 """Configuration management for MusInsights."""
 
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -29,11 +28,11 @@ class Settings(BaseSettings):
     )
 
     # Spotify settings (optional)
-    spotify_client_id: Optional[str] = Field(
+    spotify_client_id: str | None = Field(
         default=None,
         description="Spotify API client ID",
     )
-    spotify_client_secret: Optional[str] = Field(
+    spotify_client_secret: str | None = Field(
         default=None,
         description="Spotify API client secret",
     )
