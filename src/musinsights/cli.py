@@ -15,7 +15,10 @@ from musinsights.db import close_engine, get_session, init_database
 console = Console()
 
 
-@click.group()
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+@click.group(context_settings=CONTEXT_SETTINGS)
 @click.version_option(version=__version__, prog_name="musinsights")
 def cli() -> None:
     """MusInsights: High-level insights into your favorite music."""
@@ -68,6 +71,8 @@ async def ingest_local(path: Path, recursive: bool, dry_run: bool) -> None:
                 console.print(f"[green]Ingested {result.created} new songs[/green]")
                 if result.skipped > 0:
                     console.print(f"  Skipped {result.skipped} existing files")
+                if result.duplicates > 0:
+                    console.print(f"  [yellow]Duplicates: {result.duplicates}[/yellow]")
                 if result.errors > 0:
                     console.print(f"  [red]Errors: {result.errors}[/red]")
 
@@ -145,14 +150,14 @@ def export() -> None:
 
 @export.command("json")
 @click.argument("output", type=click.Path(path_type=Path))
-@click.option("--pretty", is_flag=True, help="Pretty-print JSON output")
-async def export_json(output: Path, pretty: bool) -> None:
+@click.option("--compact", is_flag=True, help="Output minified JSON without indentation")
+async def export_json(output: Path, compact: bool) -> None:
     """Export all songs and features to JSON."""
     from musinsights.exporters.formats import export_to_json
 
     try:
         async with get_session() as session:
-            await export_to_json(session, output, pretty=pretty)
+            await export_to_json(session, output, pretty=not compact)
             console.print(f"[green]Exported data to {output}[/green]")
 
     except Exception as e:

@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from musinsights.db.models import AudioFeatures, ListeningHistory, Song, SpectralFeatures
+from musinsights.db.models import AudioFeatures, ListeningHistory, Song
 
 
 class SongRepository:

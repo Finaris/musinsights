@@ -7,6 +7,7 @@ from typing import Any, Sequence
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from musinsights.db.models import AudioFeatures, Song, SpectralFeatures
+from musinsights.db.repository import AudioFeaturesRepository
 
 
 @dataclass
@@ -115,8 +116,6 @@ class BaseAnalyzer(ABC):
         Returns:
             The saved AudioFeatures object.
         """
-        from musinsights.db.repository import AudioFeaturesRepository
-
         features.song_id = song.id
         repo = AudioFeaturesRepository(self.session)
         return await repo.upsert(features)

@@ -10,6 +10,7 @@ from mutagen import File as MutagenFile
 from mutagen.easyid3 import EasyID3
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from musinsights.ingestors.base import BaseIngestor, IngestResult
@@ -60,9 +61,9 @@ class LocalFileIngestor(BaseIngestor[Path]):
                 if compute_hash:
                     metadata["file_hash"] = await self._compute_file_hash(file_path)
 
-                # Check for existing song
+                # Check for existing song by file path or hash
                 existing = await self.find_existing(
-                    file_path=str(file_path),
+                    file_path=str(file_path.absolute()),
                     file_hash=metadata.get("file_hash"),
                 )
 
@@ -71,8 +72,15 @@ class LocalFileIngestor(BaseIngestor[Path]):
                     continue
 
                 if not dry_run:
-                    await self.create_song(metadata)
-                    result.created += 1
+                    try:
+                        # Use savepoint so we can recover from constraint violations
+                        async with self.session.begin_nested():
+                            await self.create_song(metadata)
+                        result.created += 1
+                    except IntegrityError:
+                        # Duplicate detected at database level (race condition or
+                        # path normalization mismatch) - treat as skip, not error
+                        result.add_duplicate()
                 else:
                     result.created += 1  # Count as would-be-created in dry run
 

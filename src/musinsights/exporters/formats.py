@@ -143,7 +143,7 @@ def _song_to_flat_dict(song: Song) -> dict[str, Any]:
 async def export_to_json(
     session: AsyncSession,
     output_path: Path,
-    pretty: bool = False,
+    pretty: bool = True,
 ) -> int:
     """Export all songs and features to JSON.
 

@@ -19,6 +19,7 @@ class IngestResult:
     created: int = 0
     updated: int = 0
     skipped: int = 0
+    duplicates: int = 0
     errors: int = 0
     error_details: list[dict[str, Any]] = field(default_factory=list)
 
@@ -26,6 +27,10 @@ class IngestResult:
         """Record an error during ingestion."""
         self.errors += 1
         self.error_details.append({"source": source, "error": error})
+
+    def add_duplicate(self) -> None:
+        """Record a duplicate file detected during insert."""
+        self.duplicates += 1
 
 
 class BaseIngestor(ABC, Generic[SourceT]):
