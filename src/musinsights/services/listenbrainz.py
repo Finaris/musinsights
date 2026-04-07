@@ -54,6 +54,17 @@ class ListenHistoryResult:
     newest_timestamp: int | None
 
 
+@dataclass
+class Recommendation:
+    """A recommended recording from ListenBrainz."""
+
+    recording_mbid: str
+    score: float  # Relevance score
+    track_name: str | None = None
+    artist_name: str | None = None
+    release_name: str | None = None
+
+
 class ListenBrainzService:
     """Service for interacting with the ListenBrainz API."""
 
@@ -341,6 +352,84 @@ class ListenBrainzService:
                 break
 
         return all_listens
+
+    async def get_recommendations(
+        self,
+        username: str,
+        count: int = 25,
+    ) -> list[Recommendation]:
+        """Fetch recording recommendations for a user.
+
+        Uses ListenBrainz's collaborative filtering recommendations.
+
+        Args:
+            username: ListenBrainz username.
+            count: Number of recommendations to fetch (max 100).
+
+        Returns:
+            List of recommended recordings.
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{API_BASE}/1/cf/recommendation/user/{username}/recording",
+                    params={"count": min(count, 100)},
+                    timeout=30.0,
+                )
+
+                if response.status_code != 200:
+                    return []
+
+                data = response.json()
+                payload = data.get("payload", {})
+                raw_recs = payload.get("mbids", [])
+
+                recommendations = []
+                for rec in raw_recs:
+                    recording_mbid = rec.get("recording_mbid")
+                    if not recording_mbid:
+                        continue
+
+                    recommendations.append(
+                        Recommendation(
+                            recording_mbid=recording_mbid,
+                            score=rec.get("score", 0.0),
+                            track_name=rec.get("recording_name"),
+                            artist_name=rec.get("artist_name"),
+                            release_name=rec.get("release_name"),
+                        )
+                    )
+
+                return recommendations
+
+            except httpx.RequestError:
+                return []
+
+    async def lookup_recording_metadata(
+        self,
+        recording_mbid: str,
+    ) -> dict | None:
+        """Look up metadata for a recording by MBID.
+
+        Args:
+            recording_mbid: MusicBrainz recording ID.
+
+        Returns:
+            Metadata dict or None if not found.
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{API_BASE}/1/metadata/recording/{recording_mbid}",
+                    timeout=10.0,
+                )
+
+                if response.status_code == 200:
+                    return response.json()
+                return None
+
+            except httpx.RequestError:
+                return None
 
 
 def create_listen_from_song(

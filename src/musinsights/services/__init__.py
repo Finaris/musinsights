@@ -5,6 +5,7 @@ from musinsights.services.listenbrainz import (
     Listen,
     ListenBrainzService,
     ListenHistoryResult,
+    Recommendation,
     SubmitResult,
     create_listen_from_song,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "ListenBrainzService",
     "ListenHistoryResult",
     "MusicBrainzService",
+    "Recommendation",
     "SubmitResult",
     "create_listen_from_song",
 ]

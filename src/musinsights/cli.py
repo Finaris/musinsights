@@ -462,6 +462,82 @@ async def listenbrainz_import(username: str | None, limit: int | None) -> None:
         await close_engine()
 
 
+@listenbrainz.command("recommend")
+@click.option("--username", "-u", help="ListenBrainz username (uses config if not provided)")
+@click.option("--count", "-n", type=int, default=25, help="Number of recommendations")
+async def listenbrainz_recommend(username: str | None, count: int) -> None:
+    """Get music recommendations from ListenBrainz.
+
+    Uses collaborative filtering based on your listening history.
+    Shows which recommendations are already in your local library.
+    """
+    from musinsights.db import SongRepository
+    from musinsights.services.listenbrainz import ListenBrainzService
+
+    # Get username from option or settings
+    user = username or settings.listenbrainz_username
+    if not user:
+        console.print(
+            "[red]ListenBrainz username required.[/red]\n"
+            "Use --username or set MUSINSIGHTS_LISTENBRAINZ_USERNAME environment variable."
+        )
+        raise click.Abort()
+
+    try:
+        # Create service without requiring token for read-only operations
+        try:
+            service = ListenBrainzService()
+        except ValueError:
+            service = ListenBrainzService.__new__(ListenBrainzService)
+            service.token = None
+
+        console.print(f"[blue]Fetching recommendations for {user}...[/blue]")
+
+        recommendations = await service.get_recommendations(username=user, count=count)
+
+        if not recommendations:
+            console.print("[yellow]No recommendations available.[/yellow]")
+            console.print(
+                "[dim]Tip: ListenBrainz needs listening history to generate recommendations.[/dim]"
+            )
+            return
+
+        # Check which recommendations are in our library
+        async with get_session() as session:
+            repo = SongRepository(session)
+            all_songs = await repo.get_all()
+            local_mbids = {
+                song.musicbrainz_recording_id
+                for song in all_songs
+                if song.musicbrainz_recording_id
+            }
+
+            table = Table(title=f"Recommendations for {user}")
+            table.add_column("#", style="dim", width=3)
+            table.add_column("Track", style="cyan")
+            table.add_column("Artist", style="green")
+            table.add_column("In Library", style="yellow", width=10)
+
+            for i, rec in enumerate(recommendations, 1):
+                in_library = "\u2713" if rec.recording_mbid in local_mbids else ""
+                track_name = rec.track_name or "[dim]Unknown[/dim]"
+                artist_name = rec.artist_name or "[dim]Unknown[/dim]"
+
+                table.add_row(str(i), track_name, artist_name, in_library)
+
+            console.print(table)
+
+            # Summary
+            in_lib = sum(1 for r in recommendations if r.recording_mbid in local_mbids)
+            console.print(f"\n[dim]{in_lib} of {len(recommendations)} already in library[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error fetching recommendations:[/red] {e}")
+        raise click.Abort()
+    finally:
+        await close_engine()
+
+
 @cli.command()
 async def stats() -> None:
     """Show statistics about the music library."""
