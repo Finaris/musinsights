@@ -1,5 +1,6 @@
 """ListenBrainz API integration for scrobbling and listening history."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -30,6 +31,27 @@ class SubmitResult:
 
     success: bool
     message: str
+
+
+@dataclass
+class FetchedListen:
+    """A listen fetched from ListenBrainz history."""
+
+    track_name: str
+    artist_name: str
+    listened_at: datetime
+    release_name: str | None = None
+    recording_mbid: str | None = None
+    artist_mbids: list[str] | None = None
+
+
+@dataclass
+class ListenHistoryResult:
+    """Result of fetching listening history."""
+
+    listens: list[FetchedListen]
+    oldest_timestamp: int | None  # For pagination
+    newest_timestamp: int | None
 
 
 class ListenBrainzService:
@@ -203,6 +225,122 @@ class ListenBrainzService:
 
             except httpx.RequestError as e:
                 return False, f"Request failed: {e}"
+
+    async def get_listens(
+        self,
+        username: str,
+        max_ts: int | None = None,
+        min_ts: int | None = None,
+        count: int = 100,
+    ) -> ListenHistoryResult:
+        """Fetch listening history for a user.
+
+        Args:
+            username: ListenBrainz username.
+            max_ts: Return listens before this Unix timestamp (for pagination).
+            min_ts: Return listens after this Unix timestamp.
+            count: Number of listens to return (max 1000).
+
+        Returns:
+            ListenHistoryResult with fetched listens and pagination info.
+        """
+        params: dict[str, str | int] = {"count": min(count, 1000)}
+        if max_ts:
+            params["max_ts"] = max_ts
+        if min_ts:
+            params["min_ts"] = min_ts
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{API_BASE}/1/user/{username}/listens",
+                    params=params,
+                    timeout=30.0,
+                )
+
+                if response.status_code != 200:
+                    return ListenHistoryResult(
+                        listens=[], oldest_timestamp=None, newest_timestamp=None
+                    )
+
+                data = response.json()
+                payload = data.get("payload", {})
+                raw_listens = payload.get("listens", [])
+
+                listens = []
+                for raw in raw_listens:
+                    track = raw.get("track_metadata", {})
+                    additional = track.get("additional_info", {})
+
+                    listens.append(
+                        FetchedListen(
+                            track_name=track.get("track_name", "Unknown"),
+                            artist_name=track.get("artist_name", "Unknown"),
+                            listened_at=datetime.fromtimestamp(raw.get("listened_at", 0)),
+                            release_name=track.get("release_name"),
+                            recording_mbid=additional.get("recording_mbid"),
+                            artist_mbids=additional.get("artist_mbids"),
+                        )
+                    )
+
+                # Get pagination timestamps
+                oldest_ts = payload.get("oldest_listen_ts")
+                newest_ts = payload.get("newest_listen_ts")
+
+                return ListenHistoryResult(
+                    listens=listens,
+                    oldest_timestamp=oldest_ts,
+                    newest_timestamp=newest_ts,
+                )
+
+            except httpx.RequestError:
+                return ListenHistoryResult(listens=[], oldest_timestamp=None, newest_timestamp=None)
+
+    async def get_all_listens(
+        self,
+        username: str,
+        since: datetime | None = None,
+        progress_callback: "Callable[[int], None] | None" = None,  # noqa: F821
+    ) -> list[FetchedListen]:
+        """Fetch all listening history for a user with pagination.
+
+        Args:
+            username: ListenBrainz username.
+            since: Only fetch listens after this datetime.
+            progress_callback: Optional callback called with count after each page.
+
+        Returns:
+            List of all fetched listens.
+        """
+        all_listens: list[FetchedListen] = []
+        max_ts: int | None = None
+        min_ts = int(since.timestamp()) if since else None
+
+        while True:
+            result = await self.get_listens(
+                username=username,
+                max_ts=max_ts,
+                min_ts=min_ts,
+                count=1000,
+            )
+
+            if not result.listens:
+                break
+
+            all_listens.extend(result.listens)
+
+            if progress_callback:
+                progress_callback(len(all_listens))
+
+            # Get oldest timestamp for next page
+            oldest_listen = min(result.listens, key=lambda x: x.listened_at)
+            max_ts = int(oldest_listen.listened_at.timestamp()) - 1
+
+            # If we got fewer than requested, we're done
+            if len(result.listens) < 1000:
+                break
+
+        return all_listens
 
 
 def create_listen_from_song(

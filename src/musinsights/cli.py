@@ -364,6 +364,104 @@ async def listenbrainz_submit(
         await close_engine()
 
 
+@listenbrainz.command("import")
+@click.option("--username", "-u", help="ListenBrainz username (uses config if not provided)")
+@click.option("--limit", "-l", type=int, help="Maximum number of listens to import")
+async def listenbrainz_import(username: str | None, limit: int | None) -> None:
+    """Import listening history from ListenBrainz.
+
+    Fetches your listening history and matches listens to songs in your local library
+    using MusicBrainz recording IDs.
+    """
+    from musinsights.db import ListeningHistory, ListeningHistoryRepository, SongRepository
+    from musinsights.services.listenbrainz import ListenBrainzService
+
+    # Get username from option or settings
+    user = username or settings.listenbrainz_username
+    if not user:
+        console.print(
+            "[red]ListenBrainz username required.[/red]\n"
+            "Use --username or set MUSINSIGHTS_LISTENBRAINZ_USERNAME environment variable."
+        )
+        raise click.Abort()
+
+    try:
+        # Token is optional for fetching public listen history
+        try:
+            service = ListenBrainzService()
+        except ValueError:
+            # Create service without token validation for read-only operations
+            service = ListenBrainzService.__new__(ListenBrainzService)
+            service.token = None
+
+        console.print(f"[blue]Fetching listening history for {user}...[/blue]")
+
+        def progress(count: int) -> None:
+            console.print(f"  Fetched {count} listens...", end="\r")
+
+        listens = await service.get_all_listens(username=user, progress_callback=progress)
+
+        if limit:
+            listens = listens[:limit]
+
+        console.print(f"\n[green]Fetched {len(listens)} listens[/green]")
+
+        if not listens:
+            return
+
+        # Match to local library
+        async with get_session() as session:
+            song_repo = SongRepository(session)
+            history_repo = ListeningHistoryRepository(session)
+
+            # Build lookup by MBID
+            all_songs = await song_repo.get_all()
+            mbid_to_song = {
+                song.musicbrainz_recording_id: song
+                for song in all_songs
+                if song.musicbrainz_recording_id
+            }
+
+            matched = 0
+            unmatched = 0
+            imported = 0
+
+            for listen in listens:
+                song = None
+
+                # Try to match by MBID first
+                if listen.recording_mbid:
+                    song = mbid_to_song.get(listen.recording_mbid)
+
+                if song:
+                    matched += 1
+                    # Create listening history entry
+                    entry = ListeningHistory(
+                        song_id=song.id,
+                        played_at=listen.listened_at,
+                        source="listenbrainz",
+                        context={"recording_mbid": listen.recording_mbid},
+                    )
+                    await history_repo.create(entry)
+                    imported += 1
+                else:
+                    unmatched += 1
+
+            console.print(f"\n[green]Matched {matched} listens to local library[/green]")
+            console.print(f"[green]Imported {imported} listening history entries[/green]")
+            if unmatched > 0:
+                console.print(f"[yellow]{unmatched} listens could not be matched[/yellow]")
+                console.print(
+                    "[dim]Tip: Run 'musinsights enrich mbid' to add MusicBrainz IDs[/dim]"
+                )
+
+    except Exception as e:
+        console.print(f"[red]Error importing history:[/red] {e}")
+        raise click.Abort()
+    finally:
+        await close_engine()
+
+
 @cli.command()
 async def stats() -> None:
     """Show statistics about the music library."""
