@@ -1,12 +1,13 @@
 """Pipeline execution engine."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 
 from musinsights.pipeline.stages import Stage, StageResult, StageStatus
 

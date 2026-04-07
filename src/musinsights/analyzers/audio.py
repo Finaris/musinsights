@@ -1,10 +1,10 @@
 """Audio analyzer using librosa for feature extraction."""
 
 import asyncio
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 from sqlalchemy.ext.asyncio import AsyncSession

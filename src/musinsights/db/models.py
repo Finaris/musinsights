@@ -30,12 +30,20 @@ class Song(Base):
     )
     title: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     artist: Mapped[str] = mapped_column(Text, nullable=False, index=True)
-    album: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True, unique=True)
-    file_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    album: Mapped[str | None] = mapped_column(Text, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_path: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    file_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
-    external_ids: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    external_ids: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+
+    # MusicBrainz identifiers (universal join keys for external services)
+    musicbrainz_recording_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
+    musicbrainz_artist_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         default=datetime.utcnow, onupdate=datetime.utcnow
@@ -64,17 +72,17 @@ class AudioFeatures(Base):
     song_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("songs.id", ondelete="CASCADE"), primary_key=True
     )
-    tempo: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    time_signature: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    key: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0-11 for C to B
-    mode: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 1=major, 0=minor
-    loudness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # dB
-    energy: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
-    danceability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
-    valence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
-    acousticness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
-    instrumentalness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
-    speechiness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)  # 0-1
+    tempo: Mapped[float | None] = mapped_column(Float, nullable=True)
+    time_signature: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    key: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 0-11 for C to B
+    mode: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1=major, 0=minor
+    loudness: Mapped[float | None] = mapped_column(Float, nullable=True)  # dB
+    energy: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
+    danceability: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
+    valence: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
+    acousticness: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
+    instrumentalness: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
+    speechiness: Mapped[float | None] = mapped_column(Float, nullable=True)  # 0-1
     analyzed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationship
@@ -92,13 +100,13 @@ class SpectralFeatures(Base):
     song_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("songs.id", ondelete="CASCADE"), primary_key=True
     )
-    mfcc_mean: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    mfcc_std: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    spectral_centroid: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    spectral_rolloff: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    spectral_contrast: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    chroma_mean: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
-    zero_crossing_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    mfcc_mean: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    mfcc_std: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    spectral_centroid: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spectral_rolloff: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spectral_contrast: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    chroma_mean: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    zero_crossing_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     analyzed_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
     # Relationship
@@ -121,7 +129,7 @@ class ListeningHistory(Base):
     )
     played_at: Mapped[datetime] = mapped_column(nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(50), nullable=False)
-    context: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    context: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
 
     # Relationship
     song: Mapped["Song"] = relationship(back_populates="listening_history")

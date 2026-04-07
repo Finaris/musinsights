@@ -1,8 +1,6 @@
 """CLI interface for MusInsights."""
 
-import asyncio
 from pathlib import Path
-from typing import Optional
 
 import asyncclick as click
 from rich.console import Console
@@ -108,7 +106,7 @@ def analyze() -> None:
 @analyze.command("all")
 @click.option("--force", "-f", is_flag=True, help="Re-analyze all songs, even if already analyzed")
 @click.option("--limit", "-l", type=int, help="Maximum number of songs to analyze")
-async def analyze_all(force: bool, limit: Optional[int]) -> None:
+async def analyze_all(force: bool, limit: int | None) -> None:
     """Analyze all unanalyzed songs."""
     from musinsights.analyzers.audio import AudioAnalyzer
     from musinsights.db import SongRepository
@@ -185,6 +183,71 @@ async def export_csv(output: Path) -> None:
         await close_engine()
 
 
+@cli.group()
+def enrich() -> None:
+    """Enrich songs with external metadata."""
+    pass
+
+
+@enrich.command("mbid")
+@click.option("--limit", "-l", type=int, help="Maximum number of songs to process")
+@click.option("--force", "-f", is_flag=True, help="Re-lookup even if MBID already exists")
+async def enrich_mbid(limit: int | None, force: bool) -> None:
+    """Enrich songs with MusicBrainz IDs."""
+    from musinsights.db import SongRepository
+    from musinsights.services.musicbrainz import MusicBrainzService
+
+    try:
+        async with get_session() as session:
+            repo = SongRepository(session)
+            mb_service = MusicBrainzService()
+
+            if force:
+                songs = await repo.get_all(limit=limit)
+            else:
+                songs = await repo.get_without_mbid(limit=limit)
+
+            if not songs:
+                console.print("[yellow]No songs to enrich.[/yellow]")
+                return
+
+            console.print(f"[blue]Looking up MusicBrainz IDs for {len(songs)} songs...[/blue]")
+            console.print("[dim]Rate limited to 1 request/second[/dim]")
+
+            found = 0
+            not_found = 0
+
+            for song in songs:
+                match = await mb_service.lookup_recording(
+                    title=song.title,
+                    artist=song.artist,
+                    duration_ms=song.duration_ms,
+                )
+
+                if match:
+                    song.musicbrainz_recording_id = match.recording_id
+                    song.musicbrainz_artist_id = match.artist_id
+                    await repo.update(song)
+                    found += 1
+                    console.print(
+                        f"  [green]\u2713[/green] {song.artist} - {song.title} "
+                        f"[dim](score: {match.score})[/dim]"
+                    )
+                else:
+                    not_found += 1
+                    console.print(f"  [yellow]\u2717[/yellow] {song.artist} - {song.title}")
+
+            console.print(f"\n[green]Found MBIDs for {found} songs[/green]")
+            if not_found > 0:
+                console.print(f"[yellow]Could not find MBIDs for {not_found} songs[/yellow]")
+
+    except Exception as e:
+        console.print(f"[red]Error during enrichment:[/red] {e}")
+        raise click.Abort()
+    finally:
+        await close_engine()
+
+
 @cli.command()
 async def stats() -> None:
     """Show statistics about the music library."""
@@ -198,6 +261,7 @@ async def stats() -> None:
             local = await repo.count(source="local")
             spotify = await repo.count(source="spotify")
             unanalyzed = len(await repo.get_unanalyzed())
+            without_mbid = len(await repo.get_without_mbid())
 
             table = Table(title="Library Statistics")
             table.add_column("Metric", style="cyan")
@@ -208,6 +272,7 @@ async def stats() -> None:
             table.add_row("From Spotify", str(spotify))
             table.add_row("Unanalyzed", str(unanalyzed))
             table.add_row("Analyzed", str(total - unanalyzed))
+            table.add_row("With MusicBrainz ID", str(total - without_mbid))
 
             console.print(table)
 
