@@ -41,6 +41,16 @@ class Settings(BaseSettings):
         description="Spotify OAuth redirect URI",
     )
 
+    # ListenBrainz settings (optional)
+    listenbrainz_token: str | None = Field(
+        default=None,
+        description="ListenBrainz user token for API access",
+    )
+    listenbrainz_username: str | None = Field(
+        default=None,
+        description="ListenBrainz username for fetching history",
+    )
+
     # Analysis settings
     analysis_workers: int = Field(
         default=4,

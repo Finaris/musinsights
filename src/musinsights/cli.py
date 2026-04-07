@@ -248,6 +248,122 @@ async def enrich_mbid(limit: int | None, force: bool) -> None:
         await close_engine()
 
 
+@cli.group()
+def listenbrainz() -> None:
+    """ListenBrainz integration commands."""
+    pass
+
+
+@listenbrainz.command("auth")
+async def listenbrainz_auth() -> None:
+    """Validate ListenBrainz authentication."""
+    from musinsights.services.listenbrainz import ListenBrainzService
+
+    if not settings.listenbrainz_token:
+        console.print(
+            "[red]ListenBrainz token not configured.[/red]\n"
+            "Set MUSINSIGHTS_LISTENBRAINZ_TOKEN environment variable.\n"
+            "Get your token at: https://listenbrainz.org/settings/"
+        )
+        raise click.Abort()
+
+    try:
+        service = ListenBrainzService()
+        valid, result = await service.validate_token()
+
+        if valid:
+            console.print(f"[green]Token valid![/green] Authenticated as: {result}")
+        else:
+            console.print(f"[red]Token invalid:[/red] {result}")
+            raise click.Abort()
+
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise click.Abort()
+
+
+@listenbrainz.command("submit")
+@click.argument("song_id", required=False)
+@click.option("--all", "submit_all", is_flag=True, help="Submit all songs as historical listens")
+@click.option("--now-playing", is_flag=True, help="Submit as currently playing (not a listen)")
+async def listenbrainz_submit(
+    song_id: str | None, submit_all: bool, now_playing: bool
+) -> None:
+    """Submit listen(s) to ListenBrainz.
+
+    SONG_ID is the UUID of a song to submit. Use --all to submit all songs.
+    """
+    from musinsights.db import SongRepository
+    from musinsights.services.listenbrainz import (
+        ListenBrainzService,
+        create_listen_from_song,
+    )
+
+    if not song_id and not submit_all:
+        console.print("[red]Provide a SONG_ID or use --all flag[/red]")
+        raise click.Abort()
+
+    if not settings.listenbrainz_token:
+        console.print(
+            "[red]ListenBrainz token not configured.[/red]\n"
+            "Set MUSINSIGHTS_LISTENBRAINZ_TOKEN environment variable."
+        )
+        raise click.Abort()
+
+    try:
+        service = ListenBrainzService()
+
+        async with get_session() as session:
+            repo = SongRepository(session)
+
+            if submit_all:
+                songs = list(await repo.get_all())
+                if not songs:
+                    console.print("[yellow]No songs in library.[/yellow]")
+                    return
+
+                console.print(f"[blue]Submitting {len(songs)} songs to ListenBrainz...[/blue]")
+
+                listens = [create_listen_from_song(song) for song in songs]
+                result = await service.submit_listens(listens)
+
+                if result.success:
+                    console.print(f"[green]{result.message}[/green]")
+                else:
+                    console.print(f"[red]{result.message}[/red]")
+                    raise click.Abort()
+
+            else:
+                song = await repo.get_by_id(song_id)  # type: ignore
+                if not song:
+                    console.print(f"[red]Song not found:[/red] {song_id}")
+                    raise click.Abort()
+
+                listen = create_listen_from_song(song)
+
+                if now_playing:
+                    result = await service.submit_now_playing(listen)
+                else:
+                    result = await service.submit_listen(listen)
+
+                if result.success:
+                    console.print(
+                        f"[green]\u2713[/green] Submitted: {song.artist} - {song.title}"
+                    )
+                else:
+                    console.print(f"[red]{result.message}[/red]")
+                    raise click.Abort()
+
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise click.Abort()
+    except Exception as e:
+        console.print(f"[red]Error submitting listen:[/red] {e}")
+        raise click.Abort()
+    finally:
+        await close_engine()
+
+
 @cli.command()
 async def stats() -> None:
     """Show statistics about the music library."""
